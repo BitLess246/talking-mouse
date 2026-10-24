@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Talking Mouse
+GenericName=Screen Recorder
+Comment=Record your screen and pin callout captions to the mouse cursor
+Exec=talking-mouse-editor %f
+Icon=talking-mouse
+Terminal=false
+Categories=AudioVideo;Video;Recorder;
+Keywords=screencast;screen recorder;tutorial;caption;walkthrough;
+StartupWMClass=talking-mouse

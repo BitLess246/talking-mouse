@@ -9,9 +9,9 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 
-use talking_mouse::overlay::{compose, pixmap_from_rgba};
-use talking_mouse::project::Project;
-use talking_mouse::video::{frame_at, FrameReader};
+use crate::overlay::{compose, pixmap_from_rgba};
+use crate::project::Project;
+use crate::video::{frame_at, FrameReader};
 
 #[derive(Clone)]
 pub struct Request {

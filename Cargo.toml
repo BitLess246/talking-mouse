@@ -5,8 +5,18 @@ edition = "2021"
 rust-version = "1.95"
 description = "Screen recorder and editor that pins callout captions to the mouse cursor"
 license = "MIT"
+repository = "https://github.com/BitLess246/talking-mouse"
 readme = "README.md"
 default-run = "talking-mouse"
+
+[[bin]]
+name = "talking-mouse"
+path = "src/main.rs"
+
+[[bin]]
+name = "talking-mouse-editor"
+path = "src/bin/talking-mouse-editor.rs"
+required-features = ["gui"]
 
 [features]
 default = ["gui", "capture"]
@@ -31,9 +41,32 @@ rfd = { version = "0.17", optional = true }
 # default features would do this, but they also pull in wgpu).
 winit = { version = "0.30", optional = true, default-features = false, features = ["wayland-dlopen"] }
 
+[package.metadata.deb]
+name = "talking-mouse"
+maintainer = "BitLess246"
+section = "video"
+priority = "optional"
+depends = "$auto, ffmpeg, libxkbcommon-x11-0, libgl1"
+extended-description = """\
+Record your screen, then pin amber callout captions to the mouse cursor. \
+Every click, drag and typing burst is drafted as a caption; edit them on a \
+timeline and export an MP4 with chapter cards, zooms and a watermark."""
+assets = [
+    ["target/release/talking-mouse", "usr/bin/", "755"],
+    ["target/release/talking-mouse-editor", "usr/bin/", "755"],
+    ["packaging/linux/talking-mouse.desktop", "usr/share/applications/", "644"],
+    ["assets/icon/icon-256.png", "usr/share/icons/hicolor/256x256/apps/talking-mouse.png", "644"],
+    ["assets/icon/icon-512.png", "usr/share/icons/hicolor/512x512/apps/talking-mouse.png", "644"],
+    ["README.md", "usr/share/doc/talking-mouse/README.md", "644"],
+]
+
+[build-dependencies]
+winresource = "0.1"
+
 [profile.dev]
 # Frame compositing is far too slow unoptimised; keep debug builds usable.
 opt-level = 2
 
 [profile.release]
 lto = "thin"
+strip = true

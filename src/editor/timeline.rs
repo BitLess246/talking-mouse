@@ -2,7 +2,7 @@
 
 use eframe::egui::{self, Align2, Color32, CursorIcon, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 
-use talking_mouse::project::Project;
+use crate::project::Project;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Track {

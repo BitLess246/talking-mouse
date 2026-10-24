@@ -2,10 +2,80 @@
 //! through pipes as raw RGBA so no native codec bindings are needed.
 
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::OnceLock;
 
 use anyhow::{anyhow, bail, Context, Result};
+
+/// Where to find `ffmpeg` / `ffprobe`, in order: `$TALKING_MOUSE_FFMPEG_DIR`,
+/// next to our own executable (installers bundle them there), the usual
+/// Homebrew prefixes (apps launched from Finder don't inherit the shell's
+/// PATH), then plain PATH lookup.
+fn locate(name: &str) -> PathBuf {
+    let file = if cfg!(windows) { format!("{name}.exe") } else { name.to_string() };
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Some(dir) = std::env::var_os("TALKING_MOUSE_FFMPEG_DIR") {
+        dirs.push(dir.into());
+    }
+    if let Some(exe_dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
+        dirs.push(exe_dir.join("ffmpeg"));
+        dirs.push(exe_dir.join("../Resources/ffmpeg"));
+        dirs.push(exe_dir.join("../lib/talking-mouse"));
+        dirs.push(exe_dir);
+    }
+    if cfg!(target_os = "macos") {
+        dirs.push("/opt/homebrew/bin".into());
+        dirs.push("/usr/local/bin".into());
+    }
+    dirs.into_iter().map(|d| d.join(&file)).find(|p| p.is_file()).unwrap_or_else(|| file.into())
+}
+
+/// A `Command` for one of the ffmpeg tools, with no console window flashing
+/// up on Windows.
+pub fn tool(name: &str) -> Command {
+    static FFMPEG: OnceLock<PathBuf> = OnceLock::new();
+    static FFPROBE: OnceLock<PathBuf> = OnceLock::new();
+    let path = match name {
+        "ffprobe" => FFPROBE.get_or_init(|| locate("ffprobe")),
+        _ => FFMPEG.get_or_init(|| locate("ffmpeg")),
+    };
+    #[allow(unused_mut)]
+    let mut cmd = Command::new(path);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
+/// Error context for a failed spawn, with an install hint when ffmpeg is missing.
+pub fn spawn_error(name: &str) -> String {
+    match check_ffmpeg() {
+        Err(e) => e.to_string(),
+        Ok(()) => format!("starting {name}"),
+    }
+}
+
+/// Confirms ffmpeg can be run, with an install hint if not.
+pub fn check_ffmpeg() -> Result<()> {
+    let ok = |name: &str| {
+        tool(name).arg("-version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success())
+    };
+    if ok("ffmpeg") && ok("ffprobe") {
+        return Ok(());
+    }
+    let hint = if cfg!(target_os = "macos") {
+        "install it with `brew install ffmpeg`"
+    } else if cfg!(windows) {
+        "reinstall Talking Mouse, or put ffmpeg.exe and ffprobe.exe on PATH"
+    } else {
+        "install it with your package manager, e.g. `sudo apt install ffmpeg`"
+    };
+    bail!("ffmpeg was not found: {hint}")
+}
 
 #[derive(Clone, Debug)]
 pub struct VideoInfo {
@@ -17,11 +87,11 @@ pub struct VideoInfo {
 }
 
 pub fn probe(path: &Path) -> Result<VideoInfo> {
-    let out = Command::new("ffprobe")
+    let out = tool("ffprobe")
         .args(["-v", "error", "-print_format", "json", "-show_streams", "-show_format"])
         .arg(path)
         .output()
-        .context("running ffprobe (is ffmpeg installed and on PATH?)")?;
+        .with_context(|| spawn_error("ffprobe"))?;
     if !out.status.success() {
         bail!("ffprobe failed on {}: {}", path.display(), String::from_utf8_lossy(&out.stderr));
     }
@@ -66,7 +136,7 @@ pub struct FrameReader {
 
 impl FrameReader {
     pub fn open(path: &Path, start: f64, fps: f64, width: u32, height: u32) -> Result<Self> {
-        let mut child = Command::new("ffmpeg")
+        let mut child = tool("ffmpeg")
             .args(["-v", "error", "-nostdin"])
             .args(["-ss", &format!("{start:.3}")])
             .arg("-i")
@@ -77,7 +147,7 @@ impl FrameReader {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-            .context("starting ffmpeg decoder (is ffmpeg installed and on PATH?)")?;
+            .with_context(|| spawn_error("ffmpeg"))?;
         let stdout = child.stdout.take().expect("piped stdout");
         Ok(Self { child, stdout, width, height })
     }
@@ -105,7 +175,7 @@ impl Drop for FrameReader {
 
 /// Decodes the single frame shown at `t`.
 pub fn frame_at(path: &Path, t: f64, width: u32, height: u32) -> Result<Vec<u8>> {
-    let out = Command::new("ffmpeg")
+    let out = tool("ffmpeg")
         .args(["-v", "error", "-nostdin"])
         .args(["-ss", &format!("{:.3}", t.max(0.0))])
         .arg("-i")
@@ -114,7 +184,7 @@ pub fn frame_at(path: &Path, t: f64, width: u32, height: u32) -> Result<Vec<u8>>
         .args(["-f", "rawvideo", "-pix_fmt", "rgba", "-"])
         .stdin(Stdio::null())
         .output()
-        .context("starting ffmpeg (is ffmpeg installed and on PATH?)")?;
+        .with_context(|| spawn_error("ffmpeg"))?;
     let want = width as usize * height as usize * 4;
     if out.stdout.len() < want {
         // Seeking past the last frame yields nothing; show black instead.
@@ -151,7 +221,7 @@ impl FrameWriter {
         audio_from: Option<&Path>,
         opts: &EncodeOptions,
     ) -> Result<Self> {
-        let mut cmd = Command::new("ffmpeg");
+        let mut cmd = tool("ffmpeg");
         cmd.args(["-v", "error", "-y"])
             .args(["-f", "rawvideo", "-pix_fmt", "rgba"])
             .args(["-s", &format!("{width}x{height}"), "-r", &format!("{fps}")])
@@ -165,7 +235,7 @@ impl FrameWriter {
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::inherit());
-        let mut child = cmd.spawn().context("starting ffmpeg encoder (is ffmpeg installed?)")?;
+        let mut child = cmd.spawn().with_context(|| spawn_error("ffmpeg"))?;
         let stdin = child.stdin.take();
         Ok(Self { child, stdin })
     }
