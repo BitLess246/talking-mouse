@@ -1,0 +1,39 @@
+[package]
+name = "talking-mouse"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+description = "Screen recorder and editor that pins callout captions to the mouse cursor"
+license = "MIT"
+readme = "README.md"
+default-run = "talking-mouse"
+
+[features]
+default = ["gui", "capture"]
+# The egui desktop editor.
+gui = ["dep:eframe", "dep:rfd", "dep:winit"]
+# Global mouse/keyboard tracking while recording.
+capture = ["dep:device_query"]
+
+[dependencies]
+ab_glyph = "0.2.32"
+anyhow = "1.0"
+clap = { version = "4.6", features = ["derive"] }
+ctrlc = "3.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tiny-skia = "0.12"
+
+device_query = { version = "4.0", optional = true }
+eframe = { version = "0.37", optional = true, default-features = false, features = ["accesskit", "clipboard", "default_fonts", "glow", "links", "wayland", "x11"] }
+rfd = { version = "0.17", optional = true }
+# Only to load libwayland at runtime instead of linking it (eframe's own
+# default features would do this, but they also pull in wgpu).
+winit = { version = "0.30", optional = true, default-features = false, features = ["wayland-dlopen"] }
+
+[profile.dev]
+# Frame compositing is far too slow unoptimised; keep debug builds usable.
+opt-level = 2
+
+[profile.release]
+lto = "thin"
