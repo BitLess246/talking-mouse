@@ -1,6 +1,8 @@
 //! Talking Mouse: record your screen, then pin callout captions to the cursor.
 
 pub mod auto;
+#[cfg(feature = "gui")]
+pub mod editor;
 pub mod overlay;
 pub mod project;
 pub mod record;
@@ -9,6 +11,10 @@ pub mod text;
 pub mod video;
 
 use std::path::{Path, PathBuf};
+
+use anyhow::{bail, Context, Result};
+
+use crate::project::Project;
 
 /// `demo.mkv` → `demo.tmouse.json`, next to the video.
 pub fn project_path_for(video: &Path) -> PathBuf {
@@ -27,4 +33,13 @@ pub fn relative_source(video: &Path, project_file: &Path) -> PathBuf {
         Some(rel) => rel,
         None => video_abs,
     }
+}
+
+/// Starts a project around an existing video file.
+pub fn new_project(video: &Path, project_file: &Path) -> Result<Project> {
+    if !video.exists() {
+        bail!("{} does not exist", video.display());
+    }
+    let info = video::probe(video).with_context(|| format!("probing {}", video.display()))?;
+    Ok(Project::new(relative_source(video, project_file), &info))
 }

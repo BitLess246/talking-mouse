@@ -12,13 +12,13 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use eframe::egui::{self, Color32, Key, RichText, Sense, Stroke, Vec2};
 
-use talking_mouse::auto;
-use talking_mouse::overlay::viewport_at;
-use talking_mouse::project::{Anchor, Caption, Chapter, Project, Zoom};
-use talking_mouse::record::{self, InputLog, RecordOptions, Recording};
-use talking_mouse::render::{self, ExportOptions, Progress};
-use talking_mouse::video::EncodeOptions;
-use talking_mouse::{project_path_for, relative_source};
+use crate::auto;
+use crate::overlay::viewport_at;
+use crate::project::{Anchor, Caption, Chapter, Project, Zoom};
+use crate::record::{self, InputLog, RecordOptions, Recording};
+use crate::render::{self, ExportOptions, Progress};
+use crate::video::EncodeOptions;
+use crate::{project_path_for, relative_source};
 
 use preview::{Preview, Request};
 use timeline::{fmt_time, ItemRef, Timeline, Track};
@@ -30,8 +30,11 @@ pub fn run(path: Option<PathBuf>) -> Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Talking Mouse")
+            // Matches StartupWMClass in the Linux .desktop file.
+            .with_app_id("talking-mouse")
             .with_inner_size([1440.0, 900.0])
-            .with_min_inner_size([900.0, 600.0]),
+            .with_min_inner_size([900.0, 600.0])
+            .with_icon(window_icon()),
         ..Default::default()
     };
     eframe::run_native(
@@ -46,6 +49,16 @@ pub fn run(path: Option<PathBuf>) -> Result<()> {
         }),
     )
     .map_err(|e| anyhow::anyhow!("editor failed to start: {e}"))
+}
+
+fn window_icon() -> egui::IconData {
+    let png = include_bytes!("../../assets/icon/icon-256.png");
+    let pixmap = tiny_skia::Pixmap::decode_png(png).expect("bundled icon");
+    let rgba = pixmap.pixels().iter().flat_map(|p| {
+        let c = p.demultiply();
+        [c.red(), c.green(), c.blue(), c.alpha()]
+    });
+    egui::IconData { rgba: rgba.collect(), width: pixmap.width(), height: pixmap.height() }
 }
 
 struct Doc {
@@ -133,7 +146,10 @@ impl App {
             export_height: None,
             export_path: String::new(),
             export_crf: 18,
-            status: "Record your screen, or open a video / project to start.".into(),
+            status: match crate::video::check_ffmpeg() {
+                Ok(()) => "Record your screen, or open a video / project to start.".into(),
+                Err(e) => format!("{e:#}. Recording, preview and export need it."),
+            },
             confirm_close: false,
             allow_close: false,
             title: String::new(),

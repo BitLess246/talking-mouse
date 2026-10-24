@@ -4,17 +4,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use talking_mouse::project::Project;
 use talking_mouse::record::{self, RecordOptions, Recording};
 use talking_mouse::render::{self, ExportOptions, Progress};
-use talking_mouse::video::{self, EncodeOptions};
-use talking_mouse::{auto, project_path_for, relative_source};
-
-#[cfg(feature = "gui")]
-mod editor;
+use talking_mouse::video::EncodeOptions;
+use talking_mouse::{auto, new_project, project_path_for, relative_source};
 
 #[derive(Parser)]
 #[command(version, about = "Screen recorder & editor that pins captions to your mouse cursor")]
@@ -182,20 +179,12 @@ fn main() -> Result<()> {
     }
 }
 
-pub fn new_project(video: &std::path::Path, project_file: &std::path::Path) -> Result<Project> {
-    if !video.exists() {
-        bail!("{} does not exist", video.display());
-    }
-    let info = video::probe(video).with_context(|| format!("probing {}", video.display()))?;
-    Ok(Project::new(relative_source(video, project_file), &info))
-}
-
 #[cfg(feature = "gui")]
 fn run_editor(path: Option<PathBuf>) -> Result<()> {
-    editor::run(path)
+    talking_mouse::editor::run(path)
 }
 
 #[cfg(not(feature = "gui"))]
 fn run_editor(_: Option<PathBuf>) -> Result<()> {
-    bail!("this build has no editor (built without the `gui` feature); use `record`, `render` or `still`")
+    anyhow::bail!("this build has no editor (built without the `gui` feature); use `record`, `render` or `still`")
 }

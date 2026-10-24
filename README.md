@@ -13,20 +13,53 @@ While you record, Talking Mouse tracks your pointer, clicks and typing. When you
 
 ![The editor: preview, inspector and timeline](docs/editor.png)
 
-## Requirements
+## Install
+
+Download the installer for your system from the [Releases](https://github.com/BitLess246/talking-mouse/releases) page.
+
+| System | File | Notes |
+| --- | --- | --- |
+| **Windows 10/11** | `TalkingMouse-<version>-windows-x64-setup.exe` | Includes ffmpeg. Installs without admin rights and adds a Start menu entry. Optionally adds a desktop shortcut and puts the `talking-mouse` CLI on your PATH. A `…-portable.zip` is also available. |
+| **macOS 11+** (Apple Silicon and Intel) | `TalkingMouse-<version>-macos-universal.dmg` | Drag the app to Applications, then run `brew install ffmpeg`. |
+| **Debian / Ubuntu** | `talking-mouse_<version>_amd64.deb` | `sudo apt install ./talking-mouse_*.deb` also installs ffmpeg. |
+| **Other Linux** | `talking-mouse-<version>-linux-x86_64.tar.gz` | Extract it, run `./install.sh` (installs to `~/.local`), and install ffmpeg with your package manager. Run `./install.sh --uninstall` to remove it. |
+
+The installers aren't code-signed yet, so the first launch needs an extra step:
+- **Windows SmartScreen:** click *More info → Run anyway*.
+- **macOS Gatekeeper:** right-click the app → *Open*. If macOS still refuses, run `xattr -dr com.apple.quarantine "/Applications/Talking Mouse.app"`.
+
+On macOS, recording needs two permissions in *System Settings → Privacy & Security*: **Screen Recording**, and **Input Monitoring** for keystroke timing.
+
+### Publishing a release
+
+The [Build installers](.github/workflows/release.yml) workflow builds every installer on each push and pull request; they are available as workflow artifacts. To publish them, push a version tag:
+
+```sh
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+The workflow then attaches all installers to a GitHub release for that tag.
+
+## Build from source
 
 - **Rust** 1.95 or newer (required by egui 0.37).
-- **ffmpeg** and **ffprobe** on your `PATH`. These handle screen capture, decoding and H.264 encoding.
+- **ffmpeg** and **ffprobe**, used for screen capture, decoding and H.264 encoding. The app looks for them in this order: `$TALKING_MOUSE_FFMPEG_DIR`, next to its own executable, Homebrew's `bin` folders on macOS, and then your `PATH`.
 - Linux only: X11 (or XWayland). Building needs the libX11 development headers, which the `device_query` crate uses for global mouse tracking (`sudo apt install libx11-dev libxkbcommon-x11-0`). On pure Wayland, record with your compositor's tool and import the video (see below).
-
-## Build and run
 
 ```sh
 cargo build --release
-./target/release/talking-mouse            # opens the editor
+./target/release/talking-mouse-editor     # the editor, as a windowed app
+./target/release/talking-mouse --help     # the command line (`talking-mouse` alone also opens the editor)
 ```
 
 Headless build without the GUI: `cargo build --release --no-default-features --features capture`.
+
+To build an installer locally:
+- `.deb`: `cargo deb`
+- macOS `.dmg`: `packaging/macos/build-dmg.sh <version>`
+- Windows setup: `packaging/windows/talking-mouse.iss`, built with [Inno Setup](https://jrsoftware.org/isinfo.php)
+
+The workflow file shows the exact steps for each.
 
 ## Workflow
 
@@ -115,6 +148,8 @@ An imported video has no cursor track, so its captions sit at fixed points. Use 
 | `src/text.rs` | text layout and rasterisation (`ab_glyph`, with bundled Inter and JetBrains Mono) |
 | `src/render.rs` | parallel decode → composite → encode export |
 | `src/editor/` | egui editor: preview worker, timeline, inspector |
+| `src/bin/talking-mouse-editor.rs` | windowed launcher for the editor (no console window on Windows) |
+| `packaging/` | installer scripts for Windows (Inno Setup), macOS (`.app`/`.dmg`) and Linux (`.deb`, `install.sh`); `make-icons.py` regenerates the icons |
 
 Each overlay is a pure function of time, so scrubbing in the editor shows exactly what the export will contain.
 

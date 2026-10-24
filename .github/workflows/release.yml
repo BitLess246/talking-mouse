@@ -1,0 +1,147 @@
+name: Build installers
+
+# Every push to a PR builds all installers as workflow artifacts. Pushing a
+# tag like v0.2.0 also publishes them as a GitHub release.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    # Oldest supported runner, so the binaries work on older glibc.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbcommon-x11-0
+      - name: Version
+        id: version
+        run: echo "version=$(bash packaging/version.sh)" >> "$GITHUB_OUTPUT"
+      - run: cargo test --locked
+      - run: cargo build --release --locked
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb
+      - name: Package .deb
+        run: |
+          mkdir -p dist
+          cargo deb --no-build --no-strip --deb-version "${{ steps.version.outputs.version }}" -o dist/
+      - name: Package tarball
+        run: |
+          name="talking-mouse-${{ steps.version.outputs.version }}-linux-x86_64"
+          mkdir -p "stage/$name/icons"
+          cp target/release/talking-mouse target/release/talking-mouse-editor "stage/$name/"
+          cp packaging/linux/install.sh packaging/linux/talking-mouse.desktop README.md LICENSE "stage/$name/"
+          cp assets/icon/icon-256.png assets/icon/icon-512.png "stage/$name/icons/"
+          tar -C stage -czf "dist/$name.tar.gz" "$name"
+      - name: Smoke-test the .deb
+        run: |
+          sudo apt-get install -y ./dist/*.deb
+          talking-mouse --version
+          test -f /usr/share/applications/talking-mouse.desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-linux
+          path: dist/*
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Version
+        id: version
+        shell: bash
+        run: echo "version=$(bash packaging/version.sh)" >> "$GITHUB_OUTPUT"
+      - run: cargo build --release --locked
+      - name: Stage files and fetch ffmpeg
+        shell: pwsh
+        run: |
+          $stage = "dist\windows"
+          New-Item -ItemType Directory -Force "$stage\ffmpeg" | Out-Null
+          Copy-Item target\release\talking-mouse.exe, target\release\talking-mouse-editor.exe $stage
+          Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-src
+          $bin = (Get-ChildItem ffmpeg-src -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
+          Copy-Item "$bin\ffmpeg.exe", "$bin\ffprobe.exe" "$stage\ffmpeg"
+          $license = Get-ChildItem ffmpeg-src -Recurse -Filter LICENSE* | Select-Object -First 1
+          if ($license) { Copy-Item $license.FullName "$stage\ffmpeg\LICENSE.txt" }
+          Copy-Item packaging\windows\FFMPEG-NOTICE.txt "$stage\ffmpeg\README.txt"
+          & "$stage\ffmpeg\ffmpeg.exe" -hide_banner -version | Select-Object -First 1
+      - name: Build installer
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup --no-progress -y }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
+            "/DAppVersion=${{ steps.version.outputs.version }}" `
+            "/DSourceDir=$PWD\dist\windows" `
+            "/DOutputDir=$PWD\dist" `
+            packaging\windows\talking-mouse.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Portable zip
+        shell: pwsh
+        run: Compress-Archive -Path dist\windows\* -DestinationPath "dist\TalkingMouse-${{ steps.version.outputs.version }}-windows-x64-portable.zip"
+      - name: Smoke-test the installer
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\*-setup.exe | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/CURRENTUSER", "/DIR=$PWD\installed" -Wait
+          & "$PWD\installed\talking-mouse.exe" --version
+          if (-not (Test-Path "$PWD\installed\ffmpeg\ffprobe.exe")) { throw "ffprobe missing from install" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-windows
+          path: |
+            dist/*.exe
+            dist/*.zip
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Version
+        id: version
+        run: echo "version=$(bash packaging/version.sh)" >> "$GITHUB_OUTPUT"
+      - run: cargo build --release --locked --target aarch64-apple-darwin
+      - run: cargo build --release --locked --target x86_64-apple-darwin
+      - run: bash packaging/macos/build-dmg.sh "${{ steps.version.outputs.version }}" dist
+      - name: Smoke-test the app bundle
+        run: |
+          hdiutil attach dist/*.dmg -mountpoint /Volumes/TalkingMouse -nobrowse
+          "/Volumes/TalkingMouse/Talking Mouse.app/Contents/MacOS/talking-mouse" --version
+          lipo -archs "/Volumes/TalkingMouse/Talking Mouse.app/Contents/MacOS/talking-mouse-editor"
+          hdiutil detach /Volumes/TalkingMouse
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-macos
+          path: dist/*.dmg
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

@@ -58,7 +58,7 @@ const STOP_GRACE: f64 = 0.8;
 
 impl Recording {
     pub fn start(options: RecordOptions) -> Result<Self> {
-        let mut cmd = Command::new("ffmpeg");
+        let mut cmd = crate::video::tool("ffmpeg");
         cmd.args(["-hide_banner", "-loglevel", "error", "-stats", "-y"]);
         grab_args(&mut cmd, &options)?;
         cmd.args(["-c:v", "libx264", "-preset", "ultrafast", "-crf", "16", "-pix_fmt", "yuv420p"]);
@@ -70,7 +70,7 @@ impl Recording {
         let stop = Arc::new(AtomicBool::new(false));
         let started = Instant::now();
         let tracker = spawn_tracker(stop.clone(), started, options.region);
-        let mut ffmpeg = cmd.spawn().context("starting ffmpeg (is it installed and on PATH?)")?;
+        let mut ffmpeg = cmd.spawn().with_context(|| crate::video::spawn_error("ffmpeg"))?;
         let stdin = ffmpeg.stdin.take();
 
         // `-stats` prints "frame=  N ..." lines; the first one tells us when

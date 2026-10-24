@@ -1,0 +1,8 @@
+The ffmpeg.exe and ffprobe.exe in this folder are unmodified builds of FFmpeg
+(https://ffmpeg.org) from https://www.gyan.dev/ffmpeg/builds/ ("release
+essentials"). They are licensed under the GNU General Public License v3;
+see LICENSE.txt in this folder.
+
+Talking Mouse runs them as separate programs to capture, decode and encode
+video. FFmpeg's source code is available at https://ffmpeg.org/download.html
+and the build configuration at https://www.gyan.dev/ffmpeg/builds/.
